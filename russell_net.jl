@@ -11,6 +11,7 @@ using WaspNet
 using OhMyREPL
 using Random
 using BlockArrays
+using SparseArrays
 include("genPotjansConnectivity.jl")
 """
 ## Constructing a New Neuron
@@ -24,59 +25,24 @@ A concrete `AbstractNeuron` needs to cover 3 things:
 We will implement the [Leaky Integrate-&-Fire](https://en.wikipedia.org/wiki/Biological_neuron_model#Leaky_integrate-and-fire) neuron model here, but a slightly different implementation is available in `WaspNet/src/neurons/lif.jl` or with `WaspNet.LIF`. 
 
 A concrete `AbstractNeuron` implementation currently must include two specific fields: `state` and `output`. `state` holds the current state of the neuron in a `Vector` and `output` holds the output of the neuron after its last update; for a spiking neuron, update is either a `0` or a `1` to denote whether a spike did or did not occur. Additional fields should be implemented as needed to parameterize the neuron. 
-"""
-#=
-struct LIF<:AbstractNeuron     
-    τ::Float32
-    R::Float32
-    θ::Float32
-    I::Float32
-    v0::Float32
-    state::Float32
-    output::Int32    
-end
-=#
-
-
-
 #Additionally, we need to define how to evolve our neuron given a time step. This is done by adding a method to `WaspNet.update!` or `WaspNet.update`, a function which is global across all `WaspnetElements`. To `update` a neuron, we provide the `neuron` we need to update, the `input_update` to the neuron, the time duration to evolve `dt`, and the current global time `t`. In the LIF case, the `input_update` is a voltage which must be added to the membrane potential of the neuron resulting from spikes in neurons which feed into the current neuron. `reset` simply restores the state of the neuron to its some state.
 
 #We use an [Euler update](https://en.wikipedia.org/wiki/Euler_method) for the time evolution because of its simplicity of implementation.
 
 #Note that both `update` and `reset` are defined *within* `WaspNet`; that is, we actually define the methods `WaspNet.update` and `WaspNet.reset`. If defined externally, these methods are not visible to other methods from within `WaspNet`.
-
-function WaspNet.update(neuron::LIF, input_update, dt, t)
-    output = 0.
-    
-    state = neuron.state + input_update # If an impulse came in, add it
-
-    # Euler method update
-    state += (dt/neuron.τ) * (-state + neuron.R*neuron.I)
-
-    # Check for thresholding
-    if state >= neuron.θ
-        state = neuron.v0
-        output = 1. # Binary output
-    end
-    #@show(LIF(neuron.τ, neuron.R, neuron.θ, neuron.I, neuron.v0, state, output))
-    return (output, LIF(neuron.τ, neuron.R, neuron.θ, neuron.I, neuron.v0, state, output))
-end
-
-function WaspNet.reset(neuron::LIF)
-    return LIF(neuron.τ, neuron.R, neuron.θ, neuron.I, neuron.v0, neuron.v0, 0)
-end
+"""
 
 #Now we want to instantiate our `LIF` neuron, update it a few times to see the state of the neuron change
 
-neuronLIF = WaspNet.LIF(8., 10.E2, 30., 40., -55., -55., 0.)
+#neuronLIF = WaspNet.LIF(8., 10.E2, 30., 40., -55., -55., 0.)
 
-println(neuronLIF.state)
-# -55.0
-(output, neuronLIF) = update(neuronLIF, 0., 0.001, 0.)
-println(neuronLIF.state)
+#println(neuronLIF.state)
+## -55.0
+#(output, neuronLIF) = update(neuronLIF, 0., 0.001, 0.)
+#println(neuronLIF.state)
 # -49.993125
 
-neuronLIF = reset!(neuronLIF)
+#neuronLIF = reset!(neuronLIF)
 #println(neuronLIF.state)
 
 
@@ -122,7 +88,6 @@ function potjans_layer()
     scale =1.0/30.0
     Ncells,Ne,Ni, ccu = get_Ncell(scale)    
     pree = prie = prei = prii = 0.1
-
     K = round(Int, Ne*pree)
     sqrtK = sqrt(K)
     pree = prie = prei = prii = 0.1
@@ -138,8 +103,9 @@ function potjans_layer()
     _, w0Weights, _ = genStaticWeights(genStaticWeights_args)
     w0Weights
 end
-w0Weights = potjans_layer()
-@show(w0Weights)
+w0Weights = sparse(potjans_layer())
+
+#@show(w0Weights)
 # -55.0
 
 #We can also `simulate!` a neuron, chaining together multiple `update` calls and returning the outputs (spikes) and optionally the internal state of the neuron as well. The following code simulates our `LIF` neuron for 250 ms with a 0.1 ms time step. The input to the neuron is a function of one parameter, `t`, defined by `(t) -> 0.4*exp(-4t)`.
@@ -152,11 +118,17 @@ w0Weights = potjans_layer()
 #In `WaspNet`, a collection of neurons is called a `Layer` or a population. A `Layer` is homogeneous insofar as all of the `Neuron`s in a given `Layer` must be of the same type, although their individual parameters may differ. The chief utility of a `Layer` is to handle the computation of the inputs into its constituent `Neuron`s; which is handled through a multiplication of the input spike vector by a corresponding weight matrix, `W`.
 
 #The following code constructs a feed-forward `Layer` with `N` `LIF` neurons inside of it with an incoming weight matrix `W` to handle 2 inputs. 
-
-N = 8;
-neurons = [LIF(8., 10.E2, 30., 40., -55., -55., 0.) for _ in 1:N];
-weights = randn(MersenneTwister(13371485), N,2);
-layer = Layer(neurons, weights);
+@show(w0Weights[:,1])
+N = length(w0Weights);
+PotLayer = zeros(N,N)
+for i in 1:N
+    for j in 1:N
+        PotLayer[i,j] = WaspNet.LIF(8., 10.E2, 30., 40., -55., -55., 0.)
+    end
+end
+neurons = [WaspNet.LIF(8., 10.E2, 30., 40., -55., -55., 0.) for _ in 1:N];
+#weights = randn(MersenneTwister(13371485), N,2);
+layer = Layer(neurons, w0Weights[:,1]);
 
 #We can also `update!` a `Layer` by driving it with some input as we did for our `LIF` neuron above. Not that `input` here is actually an `Array{Array{<:Number, 1}, 1}` and not just `Array{<:Number, 1}`. The purpose of this is to handle recurrent or non-feed-forward connections; we will discuss this more in [Constructing Networks from Layers](@ref).
 
@@ -179,14 +151,14 @@ layersim = simulate!(layer, (t) -> [randn(2)], 0.001, 0.25, track_state=true);
 
 Nin = 2
 N1 = 3
-neurons1 = [LIF(8., 10.E2, 30., 40., -55., -55., 0.) for _ in 1:N1]
+neurons1 = [WaspNet.LIF(8., 10.E2, 30., 40., -55., -55., 0.) for _ in 1:N1]
 weights1 = randn(MersenneTwister(13371485), N1, Nin)
 layer1 = Layer(neurons1, weights1);
 
 #Now we'll make our second `Layer`. This `Layer` is special: it will take feed-forward inputs from the first `Layer`, but also a recurrent connection to itself. This means that we need to specify `W` slightly differently, and we also need to supply a new field, `conns`. To handle non-feed-forward connections in a `K`-layer, `W` must be declared as a `1x(K+1)` `BlockArray`. 
 #For our case, `K=2`. Thus, the first block in `W` holds the input weights corresponding to the `Network` input, the second block holds the weights for the first `Layer`, and the third block holds the weights for the second `Layer` feeding back into itself. Similarly we must supply `conns`, an array stating which `Layer`s the current `Layer` connects to. Entries in `conns` are indexed such that `0` corresponds to the `Network` input, `1` corresponds to the output of the first `Layer` and so on. 
 N2 = 4;
-neurons2 = [LIF(8., 10.E2, 30., 40., -55., -55., 0.) for _ in 1:N2]
+neurons2 = [WaspNet.LIF(8., 10.E2, 30., 40., -55., -55., 0.) for _ in 1:N2]
 
 W12 = randn(N2, N1) # connections from layer 1
 W22 = 5*randn(N2, N2) # Recurrent connections
@@ -205,6 +177,6 @@ println(WaspNet.get_neuron_states(mynet))
 #As does `simulate!`
 reset!(mynet)
 netsim = simulate!(mynet, (t) -> 0.4*ones(Nin), 0.001, 1, track_state=true)
-@show(W10)
-@show(neurons1)
-@show(netsim)
+#@show(W10)
+#@show(neurons1)
+#@show(netsim)
