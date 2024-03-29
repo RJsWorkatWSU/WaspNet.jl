@@ -1,6 +1,6 @@
 using JLD2
 using Distributions, Random
-#using SparseArrays
+using SparseArrays
 """
 This file consists of a function stack that seemed necessary to achieve a network with Potjans like wiring in Julia using TrainSpikeNet.jl to simulate.
 This code draws heavily on the PyNN OSB Potjans implementation code found here:
@@ -12,6 +12,9 @@ Hard coded Potjans parameters follow.
 and then the function outputs adapted Potjans parameters.
 """
 function potjans_params(ccu, scale=1.0::Float64)
+    cumulative = Dict{String, Vector{Int64}}() 
+    layer_names = Vector{String}(["23E","23I","4E","4I","5E", "5I", "6E", "6I"])    
+ 
     # Probabilities for >=1 connection between neurons in the given populations. 
     # The first index is for the target population; the second for the source population
     #             2/3e      2/3i    4e      4i      5e      5i      6e      6i
@@ -23,16 +26,13 @@ function potjans_params(ccu, scale=1.0::Float64)
                                     0.0548   0.0269 0.0257 0.0022 0.06   0.3158 0.0086 0.    
                                     0.0156   0.0066 0.0211 0.0166 0.0572 0.0197 0.0396 0.2252
                                     0.0364   0.001  0.0034 0.0005 0.0277 0.008  0.0658 0.1443 ])
-
-    layer_names = Vector{String}(["23E","23I","4E","4I","5E", "5I", "6E", "6I"])    
     # hard coded stuff is manipulated below:
-    columns_conn_probs = [col for col in eachcol(conn_probs)][1]
+    columns_conn_probs = Vector{Array}([col for col in eachcol(conn_probs)][1])
     
     ## this list gets reorganised to reflect top excitatory bottom inhibitory.
     ## Rearrange the whole matrix so that excitatory connections form a top partition 
     #and inhibitory neurons form a bottom partition.
 
-    cumulative = Dict{String, Vector{Int64}}() 
     v_old=1
     for (k,v) in pairs(ccu)
         ## A cummulative cell count
@@ -46,7 +46,7 @@ This function contains synapse selection logic seperated from iteration logic fo
 Used inside the nested iterator inside build_matrix.
 Ideally iteration could flatten to support the readability of subsequent code.
 """
-function index_assignment!(item,w0Weights,Lexc,Linh,g_strengths,Ne,Ni)  
+function index_assignment!(item,w0Weights,Lexc,Linh,g_strengths)#,Ne,Ni)  
     (jee,jie,jei,jii) = g_strengths
     # Mean synaptic weight for all excitatory projections except L4e->L2/3e
     w_mean = 87.8e-3  # nA
@@ -89,7 +89,7 @@ function index_assignment!(item,w0Weights,Lexc,Linh,g_strengths,Ne,Ni)
         setindex!(Linh, w0Weights[tgt,src], src,tgt)
         Ni=Ni+1
     end        
-    (Ne,Ni)
+    #(Ne,Ni)
 end
 """
 This function contains iteration logic seperated from synapse selection logic for readability only.
@@ -102,13 +102,11 @@ function build_matrix(cumulative::Dict{String, Vector{Int64}}, conn_probs::Matri
     #w0Weights = spzeros(Float64,Ncells,Ncells)
     #Lexc = spzeros(Float64,Ncells,Ncells)
     #Linh = spzeros(Float64,Ncells,Ncells)
-    w0Weights = zeros(Float64, (Ncells, Ncells))
-    Nsyne = 0 
-    Nsyni = 0
+    w0Weights = spzeros(Float64, (Ncells, Ncells))
     Nsynep = 0 
     Nsynip = 0
-    Lexc = zeros(Float64, (Ncells, Ncells))
-    Linh = zeros(Float64, (Ncells, Ncells))
+    Lexc = spzeros(Float64, (Ncells, Ncells))
+    Linh = spzeros(Float64, (Ncells, Ncells))
     @inbounds for (i,(k,v)) in enumerate(pairs(cumulative))
         @inbounds for src in v
             @inbounds for (j,(k1,v1)) in enumerate(pairs(cumulative))
@@ -118,7 +116,8 @@ function build_matrix(cumulative::Dict{String, Vector{Int64}}, conn_probs::Matri
                         if rand()<prob
                             append!(edge_dict[src],tgt)
                             item = src,tgt,k,k1
-                            (Nsyne,Nsyni) = index_assignment!(item,w0Weights,Lexc,Linh,g_strengths,Nsyne,Nsyni)
+                            #(Nsyne,Nsyni) = 
+                            index_assignment!(item,w0Weights,Lexc,Linh,g_strengths)
                         end
                         @assert src!=0
                         @assert tgt!=0
@@ -131,13 +130,11 @@ function build_matrix(cumulative::Dict{String, Vector{Int64}}, conn_probs::Matri
 end
 """
 Build the matrix from the Potjans parameters.
-###
-# The motivation for this approach is a lower memory footprint motivations.
-# a sparse matrix can be stored as a smaller dense matrix.
-# A 2D matrix should be stored as 1D matrix of srcs,tgts
-# A 2D weight matrix should be stored as 1 matrix, which is redistributed in loops using 
-# the 1D matrix of srcs,tgts.
-###
+ The motivation for this approach is a lower memory footprint motivations.
+ a sparse matrix can be stored as a smaller dense matrix.
+ A 2D matrix should be stored as 1D matrix of srcs,tgts
+ A 2D weight matrix should be stored as 1 matrix, which is redistributed in loops using 
+ the 1D matrix of srcs,tgts.
 
 """
 function potjans_weights(args)
@@ -154,6 +151,7 @@ end
 """
 Syntactically necesarry for TrainingSpikeNet package, I am not sure what the reason is I suspect the reason is dense formats.
 """
+#=
 function build_w0Index(edge_dict,Ncells)
     nc0Max = 0
     # what is the maximum out degree of this ragged array?
@@ -178,11 +176,12 @@ function build_w0Index(edge_dict,Ncells)
     end
     nc0,w0Index
 end
+=#
 
 function genStaticWeights(args)
     (edge_dict,w0Weights,Ne,Ni,Lexc,Linh) = potjans_weights(args)
     #dropzeros!(w0Weights)
     Ncells = args[1]
-    nc0,w0Index = build_w0Index(edge_dict,Ncells)
-    return w0Index, w0Weights, nc0
+    #nc0,w0Index = build_w0Index(edge_dict,Ncells)
+    return (Ncells, w0Weights)
 end

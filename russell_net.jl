@@ -85,7 +85,7 @@ function get_Ncell(scale=1.0::Float64)
 end
 
 function potjans_layer()
-    scale =1.0/30.0
+    scale = 1/1030.0
     Ncells,Ne,Ni, ccu = get_Ncell(scale)    
     pree = prie = prei = prii = 0.1
     K = round(Int, Ne*pree)
@@ -100,7 +100,7 @@ function potjans_layer()
     jie = -0.75ji 
     jii = -ji
     genStaticWeights_args = (;Ncells,jee,jie,jei,jii,ccu,scale)
-    _, w0Weights, _ = genStaticWeights(genStaticWeights_args)
+    Ncells, w0Weights = genStaticWeights(genStaticWeights_args)
     w0Weights
 end
 w0Weights = sparse(potjans_layer())
@@ -118,15 +118,23 @@ w0Weights = sparse(potjans_layer())
 #In `WaspNet`, a collection of neurons is called a `Layer` or a population. A `Layer` is homogeneous insofar as all of the `Neuron`s in a given `Layer` must be of the same type, although their individual parameters may differ. The chief utility of a `Layer` is to handle the computation of the inputs into its constituent `Neuron`s; which is handled through a multiplication of the input spike vector by a corresponding weight matrix, `W`.
 
 #The following code constructs a feed-forward `Layer` with `N` `LIF` neurons inside of it with an incoming weight matrix `W` to handle 2 inputs. 
-@show(w0Weights[:,1])
-N = length(w0Weights);
-PotLayer = zeros(N,N)
+#@show(w0Weights[:,1])
+Ncells = length(w0Weights/1000.0);
+@show(Ncells)
+PotLayer = [[WaspNet.LIF() for i in 1:Ncells] for j in 1:Ncells] #zeros(WaspNet.LIF, (Ncells, Ncells))
+@show(PotLayer)
+#w0Weights.nzval
+#=
 for i in 1:N
     for j in 1:N
-        PotLayer[i,j] = WaspNet.LIF(8., 10.E2, 30., 40., -55., -55., 0.)
+        if w0Weights[i][j] != 0
+            PotLayer[i][j] = WaspNet.LIF(8., 10.E2, 30., 40., -55., -55., 0.)
+            @show(PotLayer[i,j])
+        end
     end
 end
-neurons = [WaspNet.LIF(8., 10.E2, 30., 40., -55., -55., 0.) for _ in 1:N];
+=#
+#neurons = [WaspNet.LIF(8., 10.E2, 30., 40., -55., -55., 0.) for _ in 1:N];
 #weights = randn(MersenneTwister(13371485), N,2);
 layer = Layer(neurons, w0Weights[:,1]);
 
